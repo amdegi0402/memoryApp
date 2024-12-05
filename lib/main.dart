@@ -1,120 +1,185 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'sqlite.dart';
 import 'function/dateFunc.dart';
 import 'function/dateFunc_2.dart';
 import 'value.dart';
 import 'drawerMenu.dart';
 
-void main() => runApp(MyApp());
+void main() async {
+  // Flutterの初期化を確実に行う
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  runApp(const MyApp());
+}
 
 class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: "Baby Names",
-      home: MyHomePage(),
+      title: 'メモリートレーニング',
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.pink,
+          brightness: Brightness.light,
+        ),
+      ),
+      home: const MyHomePage(),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
+  const MyHomePage({super.key});
+
   @override
-  _MyHomePageState createState() => _MyHomePageState();
+  State<MyHomePage> createState() => _MyHomePageState();
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  final myController_1 = TextEditingController();
-  final myController_2 = TextEditingController();
-  List<String> title = [];
-  List<String> keyword = [];
-  List<String> id = [];
+  final TextEditingController _controller1 = TextEditingController();
+  final TextEditingController _controller2 = TextEditingController();
+  
+  List<String> titles = [];
+  List<String> keywords = [];
+  List<String> ids = [];
 
-  /*ページ初期時のデータベース関係の処理*/
-  _initReadStudyDays() async {
-    await createDatabase(); //データベース接続
-    await updateDb(date(0)); //juge判定　学習日と今日の日付が一致していればjuge=1
-    var result_1 = await readStudyDays(0, date(0)); //タイトル読み込み
-    var result_2 = await readStudyDays(1, date(0)); //キーワード読み込み
-    var result_3 = await readStudyDays(5, date(0)); //ID読み込み
-    setState(() {
-      title = result_1;
-      keyword = result_2;
-      id = result_3;
-    });
+  bool _isLoading = true;
+  String? _error;
+
+  /// データベースの初期化とデータの読み込み
+  Future<void> _initReadStudyDays() async {
+    try {
+      await createDatabase();
+      await updateDb(date(0));
+      
+      final titlesResult = await readStudyDays(0, date(0));
+      final keywordsResult = await readStudyDays(1, date(0));
+      final idsResult = await readStudyDays(5, date(0));
+
+      if (mounted) {
+        setState(() {
+          titles = titlesResult;
+          keywords = keywordsResult;
+          ids = idsResult;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
   }
 
-  /*復習日を過ぎた未学習の項目を本日の日付に変更する処理*/
-  _initChangeStudyDay() {
-    //次回の学習日と今日の日付を比較して今日の日付より古ければ今日の日付に変える
-    //日付比較判定処理
-    updateNextNum(calcToday(), date(0));
+  /// 復習日の更新処理
+  Future<void> _initChangeStudyDay() async {
+    try {
+      await updateNextNum(calcToday(), date(0));
+    } catch (e) {
+      print('復習日更新エラー: $e');
+    }
   }
 
   @override
-  initState() {
+  void initState() {
     super.initState();
-    _initChangeStudyDay();
-    _initReadStudyDays(); //データベース処理
+    _initializeApp();
+  }
+
+  Future<void> _initializeApp() async {
+    await _initChangeStudyDay();
+    await _initReadStudyDays();
+  }
+
+  @override
+  void dispose() {
+    _controller1.dispose();
+    _controller2.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    var val = calcDateNumber();
-    var result = calcDate(val);
     return Scaffold(
-        appBar: AppBar(
-            title: Text("${date(0)}　反復学習リスト"),
-            backgroundColor: Colors.pink.withOpacity(0.5)),
-        drawer: Drawer(
-          child: drawerMenu(context),
-        ),
-        body: Stack(children: <Widget>[
-          new Container(
-            height: double.infinity,
-            width: double.infinity,
-            decoration: new BoxDecoration(
-              image: new DecorationImage(
-                image: new AssetImage("assets/background.png"),
+      appBar: AppBar(
+        title: Text('${date(0)} 反復学習リスト'),
+        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+      ),
+      drawer: Drawer(
+        child: drawerMenu(context),
+      ),
+      body: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage('assets/background.png'),
                 fit: BoxFit.cover,
               ),
             ),
           ),
-          listViewes(context, title, keyword, id),
-        ]));
+          _buildMainContent(),
+        ],
+      ),
+    );
   }
-}
 
-Widget listViewes(BuildContext context, var title, var key, var id) {
-  if (title == null) {
-    print("titleはnull");
-    return Center(child: Text("本日のタスクはありません"));
-  } else {
-    print("titleはnullではありません");
-    return ListView.separated(
-        //ListView.separatedでリストに区切り線を表示する
-        itemCount: title.length,
-        separatorBuilder: (BuildContext context, int index) => Divider(
-              color: Colors.black,
+  Widget _buildMainContent() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null) {
+      return Center(child: Text('エラーが発生しました: $_error'));
+    }
+
+    if (titles.isEmpty) {
+      return const Center(
+        child: Text(
+          '本日のタスクはありません',
+          style: TextStyle(fontSize: 16),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      itemCount: titles.length,
+      itemBuilder: (context, index) {
+        return Card(
+          elevation: 2,
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: ListTile(
+            leading: Icon(
+              Icons.grade,
+              color: Theme.of(context).colorScheme.primary,
             ),
-        itemBuilder: (BuildContext context, int index) {
-          return Card(
-            child: ListTile(
-                leading: Icon(Icons.grade),
-                title: Text("${title[index]}"),
-                subtitle: Text(key[index]),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ValueList(
-                          catch_title: title[index],
-                          catch_key: key[index],
-                          catch_id: id[
-                              index]), //次のページへ　科目名,キーワード,idを渡す処理　ValueListクラスが呼び出される value.dart
-                    ),
-                  );
-                }),
-          );
-        });
+            title: Text(
+              titles[index],
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: Text(keywords[index]),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ValueList(
+                    catch_title: titles[index],
+                    catch_key: keywords[index],
+                    catch_id: ids[index],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 }
